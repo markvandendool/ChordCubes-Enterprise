@@ -1399,21 +1399,25 @@ async function refreshAllCubeFaces(previewWith7th = false) {
                 // Generate new texture with effective 7th setting and extensions
                 // Use force7th parameter instead of modifying global withSeventh
                 const shouldForce7th = previewWith7th && !shouldExcludeFromPreview;
+                
+                // CHECK CUBE-SPECIFIC PERMANENT 7TH FLAG
+                const cubeHasForce7th = cube.userData.force7th === true;
+                const finalForce7th = shouldForce7th || cubeHasForce7th;
 
-                console.log(`[7TH FIX V1.61] ${roman}: shouldForce7th=${shouldForce7th} (previewWith7th=${previewWith7th}, excluded=${shouldExcludeFromPreview}, alreadyHas7th=${alreadyHas7th})`);
+                console.log(`[7TH FIX V1.61] ${roman}: shouldForce7th=${shouldForce7th} (previewWith7th=${previewWith7th}, excluded=${shouldExcludeFromPreview}, alreadyHas7th=${alreadyHas7th}), cubeSpecific7th=${cubeHasForce7th}, FINAL=${finalForce7th}`);
 
-                // 🔥 CRITICAL FIX: Use global activeExtensions instead of cube.userData.extensions
+                // 🔥 CRITICAL FIX: Use global activeExtensions OR cube.userData.extensions for permanent mods
                 const extensionsToUse = activeExtensions.size > 0 ? Array.from(activeExtensions) : cube.userData.extensions;
                 console.log(`🔥 [EXTENSION FIX] ${roman} - Using extensions:`, extensionsToUse);
 
                 // 🔥 STAGE 9: loadFaceTexture() called
                 if (pipelineTracer) pipelineTracer.triggerStage(9, {
                     cubeRoman: roman,
-                    shouldForce7th,
+                    shouldForce7th: finalForce7th,
                     extensionsUsed: extensionsToUse ? (extensionsToUse.map ? extensionsToUse.map(ext => ext.name) : extensionsToUse) : 'none'
                 });
 
-                const newTexture = loadFaceTexture(label, roman, shouldForce7th, extensionsToUse);
+                const newTexture = loadFaceTexture(label, roman, finalForce7th, extensionsToUse);
 
                 // FIXED: Update the actual front face (index 5), not index 0 (3rd face)
                 const frontFaceIndex = 5;
@@ -1472,9 +1476,10 @@ async function refreshAllCubeFaces(previewWith7th = false) {
                 }
 
                 // Generate new texture with effective 7th setting and extensions
-                // Use force7th parameter instead of modifying global withSeventh
+                // SHELF CUBES: Only use TEMPORARY preview extensions (activeExtensions), NEVER permanent userData.extensions
                 const shouldForce7th = previewWith7th && !shouldExcludeFromPreview;
-                const newTexture = loadFaceTexture(label, roman, shouldForce7th, cube.userData.extensions);
+                const extensionsForShelf = activeExtensions.size > 0 ? Array.from(activeExtensions) : null; // NEVER use cube.userData.extensions for shelf
+                const newTexture = loadFaceTexture(label, roman, shouldForce7th, extensionsForShelf);
 
                 // FIXED: Update the actual front face (index 5), not index 0 (3rd face)
                 const frontFaceIndex = 5;
@@ -9555,9 +9560,36 @@ async function animateShelfClickAdd(shelf) {
         console.log(`[SHELF-CLICK DEBUG] ${clone.userData.roman} - withSeventh: ${withSeventh}, isShiftClick: ${isShiftClick}, shouldUse7th: ${shouldUse7th}`);
         console.log(`[SHELF-CLICK DEBUG] Global modifiers - Alt: ${globalModifierState.altPressed}, Shift: ${globalModifierState.shiftPressed} (shift for 7ths, option for compound intervals), Ctrl: ${globalModifierState.ctrlPressed}, Meta: ${globalModifierState.metaPressed}`);
 
+        // PERMANENT MODIFICATIONS FOR FRONT ROW CUBE
+        // Transfer modifier states to permanent cube data (NOT temporary textures)
         if (isShiftClick) {
-            console.log(`[SHELF SHIFT+CLICK] FORCING 7th for ${clone.userData.roman}`);
-            updateChordFaceWithDiatonic7th(clone);
+            console.log(`[SHELF SHIFT+CLICK] Adding PERMANENT 7th to front row cube: ${clone.userData.roman}`);
+            clone.userData.force7th = true; // Permanent 7th flag for this cube
+        }
+
+        // Transfer active extensions to permanent cube data
+        if (activeExtensions.size > 0) {
+            clone.userData.extensions = Array.from(activeExtensions);
+            console.log(`[SHELF EXTENSION+CLICK] Adding PERMANENT extensions to front row cube: ${clone.userData.roman}`, clone.userData.extensions.map(e => e.name));
+        }
+
+        // REGENERATE FRONT FACE TEXTURE with permanent modifications
+        if (isShiftClick || activeExtensions.size > 0) {
+            const roman = clone.userData.roman;
+            const label = (labelMode === 'roman') ? roman : clone.userData.letter || roman;
+            
+            // Generate permanent texture using standard system
+            const newTexture = loadFaceTexture(label, roman, clone.userData.force7th, clone.userData.extensions);
+            
+            // Update the front face (index 5) with permanent texture
+            const frontFaceIndex = 5;
+            if (clone.material && clone.material[frontFaceIndex]) {
+                // Dispose old texture
+                if (clone.material[frontFaceIndex].map) clone.material[frontFaceIndex].map.dispose();
+                clone.material[frontFaceIndex].map = newTexture;
+                clone.material[frontFaceIndex].needsUpdate = true;
+                console.log(`[SHELF+MODIFIER] Updated front row cube ${roman} with permanent modifications (7th: ${!!clone.userData.force7th}, extensions: ${clone.userData.extensions ? clone.userData.extensions.length : 0})`);
+            }
         }
 
         playChordForObjectWith7th(clone, shouldUse7th);
